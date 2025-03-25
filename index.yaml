@@ -1,0 +1,13 @@
+apiVersion: v1
+entries:
+  idempotency-chart:
+  - apiVersion: v2
+    created: "2025-03-25T16:28:54.3598113+03:00"
+    description: A Helm chart for Kubernetes
+    digest: 7ae804a5345ddd6176c33a962a954e287292fc40b061690d22cde6a0b1b7b3f0
+    name: idempotency-chart
+    type: application
+    urls:
+    - https://slavadenisenko.github.io/idempotency/idempotency-chart-1.0.0.tgz
+    version: 1.0.0
+generated: "2025-03-25T16:28:54.3585247+03:00"
