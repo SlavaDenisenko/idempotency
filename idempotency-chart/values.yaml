@@ -1,0 +1,429 @@
+global:
+  application:
+    image:
+      pullPolicy: Always
+    containerPort: 8080
+    jpa:
+      hibernate:
+        ddlAuto: validate
+    kafka:
+      bootstrapServers: my-cluster-kafka-bootstrap:9092
+  database:
+    image:
+      repository: postgres
+      tag: "14"
+    containerPort: 5432
+    driverClassName: org.postgresql.Driver
+    accessModes: [ "ReadWriteOnce" ]
+    resources:
+      requests:
+        storage: 1Gi
+    volumeMount:
+      name: postgres-storage
+      mountPath: /var/lib/postgresql/data
+    service:
+      port: 5432
+    migration:
+      image:
+        repository: liquibase/liquibase
+        tag: "4.27.0"
+      volumeMount:
+        name: changelog-volume
+        rootPath: /liquibase
+        mountPath: /changelog/changelog.yaml
+  replicaCount: 3
+  service:
+    name: svc
+    port: 80
+    type: ClusterIP
+
+services:
+  order-service:
+    application:
+      image:
+        repository: sdenisenko/order-service
+        tag: "1.0"
+      redis:
+        host: my-redis-master
+        port: 6379
+      kafka:
+        groupId: order-service-group
+        topics:
+          - reserve-stock
+          - book-delivery
+          - payment
+          - inventory-compensate
+          - delivery-compensate
+          - order-results
+    database:
+      enabled: true
+      name: db-order
+      username: postgres-order
+      password: password-order
+      service:
+        name: svc-db-order
+      migration:
+        changelog: |
+          databaseChangeLog:
+                - changeSet:
+                    id: 1
+                    author: Vyacheslav Denisenko
+                    changes:
+                      - createTable:
+                          tableName: t_order
+                          columns:
+                            - column:
+                                name: id
+                                type: bigint
+                                autoIncrement: true
+                                constraints:
+                                  primaryKey: true
+                            - column:
+                                name: status
+                                type: varchar(20)
+                                constraints:
+                                  nullable: false
+                      - createTable:
+                          tableName: t_order_line_item
+                          columns:
+                            - column:
+                                name: id
+                                type: bigint
+                                autoIncrement: true
+                                constraints:
+                                  primaryKey: true
+                            - column:
+                                name: item_id
+                                type: varchar(255)
+                                constraints:
+                                  nullable: false
+                            - column:
+                                name: quantity
+                                type: int
+                                constraints:
+                                  nullable: false
+                            - column:
+                                name: order_id
+                                type: bigint
+                                constraints:
+                                  foreignKeyName: order_id_fk
+                                  references: t_order(id)
+    replicaCount: 1
+    service:
+      name: svc-order
+    ingress:
+      enabled: true
+      className: "nginx"
+      annotations:
+        nginx.ingress.kubernetes.io/use-regex: "true"
+      hosts:
+        - host: arch.homework
+          paths:
+            - path: /orders
+              pathType: Exact
+              definition: This endpoint is designed to place an order.
+            - path: /orders/([^/]+)
+              pathType: ImplementationSpecific
+              definition: This endpoint is designed to view a specific order and its status.
+  inventory-service:
+    application:
+      image:
+        repository: sdenisenko/inventory-service
+        tag: "1.0"
+      kafka:
+        groupId: inventory-service-group
+        topics:
+          - reserve-stock
+          - inventory-compensate
+          - order-results
+    database:
+      enabled: true
+      name: db-inventory
+      username: postgres-inventory
+      password: password-inventory
+      service:
+        name: svc-db-inventory
+      migration:
+        changelog: |
+          databaseChangeLog:
+          - changeSet:
+              id: 1
+              author: Vyacheslav Denisenko
+              changes:
+                - createTable:
+                    tableName: t_stock
+                    columns:
+                      - column:
+                          name: id
+                          type: bigint
+                          autoIncrement: true
+                          constraints:
+                            primaryKey: true
+                      - column:
+                          name: item_id
+                          type: varchar(255)
+                          constraints:
+                            unique: true
+                            nullable: false
+                      - column:
+                          name: quantity
+                          type: int
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: reserved
+                          type: int
+                          constraints:
+                            nullable: false
+                - createTable:
+                    tableName: t_transaction_log
+                    columns:
+                      - column:
+                          name: id
+                          type: bigint
+                          autoIncrement: true
+                          constraints:
+                            primaryKey: true
+                      - column:
+                          name: order_id
+                          type: bigint
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: event_type
+                          type: varchar(20)
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: payload
+                          type: varchar
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: result
+                          type: varchar(20)
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: created_at
+                          type: timestamp(0)
+                          constraints:
+                            nullable: false
+    replicaCount: 2
+    service:
+      name: svc-inventory
+    ingress:
+      enabled: true
+      className: "nginx"
+      hosts:
+        - host: arch.homework
+          paths:
+            - path: /inventory/stocks
+              pathType: Exact
+              definition: |
+                POST-request adds stock items to the inventory.
+                GET-request retrieves a list of all inventory items.
+  delivery-service:
+    application:
+      image:
+        repository: sdenisenko/delivery-service
+        tag: "1.0"
+      kafka:
+        groupId: delivery-service-group
+        topics:
+          - book-delivery
+          - delivery-compensate
+          - order-results
+    database:
+      enabled: true
+      name: db-delivery
+      username: postgres-delivery
+      password: password-delivery
+      service:
+        name: svc-db-delivery
+      migration:
+        changelog: |
+          databaseChangeLog:
+          - changeSet:
+              id: 1
+              author: Vyacheslav Denisenko
+              changes:
+                - createTable:
+                    tableName: t_delivery_slot
+                    columns:
+                      - column:
+                          name: id
+                          type: bigint
+                          autoIncrement: true
+                          constraints:
+                            primaryKey: true
+                      - column:
+                          name: courier_id
+                          type: bigint
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: delivery_time
+                          type: timestamp(0)
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: reserved
+                          type: boolean
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: order_id
+                          type: bigint
+                - createTable:
+                    tableName: t_transaction_log
+                    columns:
+                      - column:
+                          name: id
+                          type: bigint
+                          autoIncrement: true
+                          constraints:
+                            primaryKey: true
+                      - column:
+                          name: order_id
+                          type: bigint
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: event_type
+                          type: varchar(20)
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: payload
+                          type: varchar
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: result
+                          type: varchar(20)
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: created_at
+                          type: timestamp(0)
+                          constraints:
+                            nullable: false
+    replicaCount: 2
+    service:
+      name: svc-delivery
+    ingress:
+      enabled: true
+      className: "nginx"
+      hosts:
+        - host: arch.homework
+          paths:
+            - path: /delivery/slots
+              pathType: Exact
+              definition: |
+                POST-request adds delivery time slots.
+                GET-request retrieves a list of all delivery time slots.
+  payment-service:
+    application:
+      image:
+        repository: sdenisenko/payment-service
+        tag: "1.0"
+      kafka:
+        groupId: payment-service-group
+        topics:
+          - payment
+          - order-results
+    database:
+      enabled: true
+      name: db-payment
+      username: postgres-payment
+      password: password-payment
+      service:
+        name: svc-db-payment
+      migration:
+        changelog: |
+          databaseChangeLog:
+          - changeSet:
+              id: 1
+              author: Vyacheslav Denisenko
+              changes:
+                - createTable:
+                    tableName: t_account
+                    columns:
+                      - column:
+                          name: id
+                          type: bigint
+                          autoIncrement: true
+                          constraints:
+                            primaryKey: true
+                      - column:
+                          name: user_id
+                          type: bigint
+                          constraints:
+                            unique: true
+                            nullable: false
+                      - column:
+                          name: balance
+                          type: decimal
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: reserved
+                          type: decimal
+                          constraints:
+                            nullable: false
+                - createTable:
+                    tableName: t_transaction_log
+                    columns:
+                      - column:
+                          name: id
+                          type: bigint
+                          autoIncrement: true
+                          constraints:
+                            primaryKey: true
+                      - column:
+                          name: order_id
+                          type: bigint
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: event_type
+                          type: varchar(20)
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: payload
+                          type: varchar
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: result
+                          type: varchar(20)
+                          constraints:
+                            nullable: false
+                      - column:
+                          name: created_at
+                          type: timestamp(0)
+                          constraints:
+                            nullable: false
+    replicaCount: 2
+    service:
+      name: svc-payment
+    ingress:
+      enabled: true
+      className: "nginx"
+      annotations:
+        nginx.ingress.kubernetes.io/use-regex: "true"
+      hosts:
+        - host: arch.homework
+          paths:
+            - path: /payment/accounts
+              pathType: Exact
+              definition: This endpoint creates a new payment account for a user.
+            - path: /payment/accounts/([^/]+)
+              pathType: ImplementationSpecific
+              definition: This endpoint retrieves the payment account for a specific user by userId.
+
+
+nameOverride: "idempotency"
+fullnameOverride: "idempotency"

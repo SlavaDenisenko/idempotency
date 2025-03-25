@@ -1,0 +1,14 @@
+{{- $root := . -}}
+{{- range $name, $service := .Values.services }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-configmap
+  annotations:
+    "helm.sh/hook": pre-install
+data:
+  SERVER_PORT: {{ $service.application.containerPort | default $root.Values.global.application.containerPort | quote }}
+  CHANGELOG: |
+    {{ $service.database.migration.changelog | nindent 4 }}
+---
+{{- end }}

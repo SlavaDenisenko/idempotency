@@ -1,0 +1,5 @@
+package com.denisenko.statemachine;
+
+public enum OrderEvent {
+    RESERVE_STOCK, RESERVE_STOCK_FAILURE, BOOK_DELIVERY, BOOK_DELIVERY_FAILURE, PAYMENT, PAYMENT_FAILURE, COMPLETE
+}

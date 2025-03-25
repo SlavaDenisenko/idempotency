@@ -1,0 +1,17 @@
+package com.denisenko;
+
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
+import org.testcontainers.containers.PostgreSQLContainer;
+
+@TestConfiguration(proxyBeanMethods = false)
+public class ContainerConfig {
+    static String POSTGRES_IMAGE = "postgres:14";
+
+    @Bean
+    @ServiceConnection
+    PostgreSQLContainer<?> postgres() {
+        return new PostgreSQLContainer<>(POSTGRES_IMAGE);
+    }
+}
